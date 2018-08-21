@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+#
+# This Source Code Form is subject to the terms of the Mozilla Public
+# License, v. 2.0. If a copy of the MPL was not distributed with this
+# file, You can obtain one at http://mozilla.org/MPL/2.0/.
+#
+
+#
+# Copyright 2018, Joyent, Inc.
+#
+
+#
+# Common checks/functions that we want in both runtest and runtests.
+#
+
+
+#---- support functions
+
+function fatal
+{
+    echo "$(basename $0): fatal error: $*"
+    exit 1
+}
+
+
+#---- mainline
+
+if [[ $(zonename) != "global" ]]; then
+    echo "FATAL: must run these tests from the global zone" >&2
+    exit 2
+fi
+
+
+# Gather DC data.
+export DOCKER_UUID="$(vmadm lookup -j alias=docker0 | json 0.uuid)"
+export DOCKER_ADMIN_URL="http://$(vmadm lookup -j alias=docker0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export DOCKER_URL="https://$(vmadm lookup -j alias=docker0 | json 0.nics \
+    | json -c 'this.nic_tag==="external"' 0.ip):2376"
+export FWAPI_URL="http://$(vmadm lookup -j alias=fwapi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export PAPI_URL="http://$(vmadm lookup -j alias=papi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export VMAPI_URL="http://$(vmadm lookup -j alias=vmapi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export SAPI_URL="http://$(vmadm lookup -j alias=sapi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export NAPI_URL="http://$(vmadm lookup -j alias=napi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+export VOLAPI_URL="http://$(vmadm lookup -j alias=volapi0 | json 0.nics \
+    | json -c 'this.nic_tag==="admin"' 0.ip)"
+
+# Docker CLI versions for testing:
+# 1. 'DOCKER_AVAILABLE_CLI_VERSIONS' is the set of 'docker' CLI versions we
+#    install in the "sdcdockertest_client" zone from which we run 'docker'.
+#    This is the set of possible values for DOCKER_CLI_VERSIONS.
+# 2. 'DOCKER_CLI_VERSIONS' defines the 'docker' CLI versions against which we
+#    run the "test/integration/cli-*.test.js" files. This is overridable, e.g.:
+#       DOCKER_CLI_VERSIONS=1.12.2 .../runtests
+export DOCKER_AVAILABLE_CLI_VERSIONS="1.12.2 1.11.1 1.10.3 1.9.1 1.8.3"
+if [[ "$DOCKER_CLI_VERSIONS" == "all" ]]; then
+    export DOCKER_CLI_VERSIONS="$DOCKER_AVAILABLE_CLI_VERSIONS"
+fi
+if [[ -z "$DOCKER_CLI_VERSIONS" || "$DOCKER_CLI_VERSIONS" == "latest" ]]; then
+    # Use the first (latest) version, splitting on the space separator.
+    export DOCKER_CLI_VERSIONS="${DOCKER_AVAILABLE_CLI_VERSIONS%% *}"
+fi
+
+# docker-compose versions for testing:
+# 1. 'COMPOSE_AVAILABLE_CLI_VERSIONS' is the set of 'docker-compose' CLI
+#    versions we install in the "sdcdockertest_client" zone from which we run
+#    'docker-compose'. This is the set of possible values for
+#    COMPOSE_CLI_VERSIONS.
+# 2. 'COMPOSE_CLI_VERSIONS' defines the 'docker-compose' CLI versions against
+#    which we run the "test/integration/compose-*.test.js" files. This is
+#    overridable, e.g.: COMPOSE_CLI_VERSIONS=1.9.0 .../runtests
+#
+# The only available compose version for now is 1.9.0 because it is what
+# triton-docker uses (see
+# https://github.com/joyent/triton-docker-cli/blob/4cc524dcb1a9d12adf192e057ca737fcf80069be/triton-docker#L5)
+# and triton-docker represents the closest thing to what's officially supported
+# by sdc-docker as possible.
+export COMPOSE_AVAILABLE_CLI_VERSIONS="1.9.0"
+if [[ "$COMPOSE_CLI_VERSIONS" == "all" ]]; then
+    export COMPOSE_CLI_VERSIONS="$COMPOSE_AVAILABLE_CLI_VERSIONS"
+fi
+if [[ -z "$COMPOSE_CLI_VERSIONS" || "$COMPOSE_CLI_VERSIONS" == "latest" ]]; then
+    # Use the first (latest) version, splitting on the space separator.
+    export COMPOSE_CLI_VERSIONS="${COMPOSE_AVAILABLE_CLI_VERSIONS%% *}"
+fi
+
+# Guard
+guard_file=/lib/sdc/.sdc-test-no-production-data
+if [[ $(uname) == "SunOS" && ! -f "$guard_file" ]]; then
+    cat <<EOF
+To run this test you must create the file:
+
+    $guard_file
+
+after ensuring you have no production data on this SDC.
+EOF
+    exit 2
+fi
+
+# Determine whether NFS Volumes (RFD 26) are supported in this setup
+NFS_VOLUMES_ENABLED=$(curl -sS ${DOCKER_ADMIN_URL}/admin/config \
+    | json -H experimental_docker_nfs_shared_volumes)
+[[ ${NFS_VOLUMES_ENABLED} == "true" ]] || NFS_VOLUMES_ENABLED="false"
+export NFS_VOLUMES_ENABLED
+
+# Prerequisite: ensure there is a package matching the current sdc-docker
+# 'packagePrefix'.
+packagePrefix=$(json -f /zones/$DOCKER_UUID/root/opt/smartdc/docker/etc/config.json packagePrefix)
+availPackages=$(/opt/smartdc/bin/sdc-papi /packages | json -Hac "this.name.indexOf('$packagePrefix')===0")
+
+if [[ -z "$availPackages" ]]; then
+    cat >&2 <<EOF
+FATAL: Your DC has no packages in PAPI matching the sdc-docker packagePrefix,
+"$packagePrefix". You must fix that by either (a) setting the sdc-docker
+PACKAGE_PREFIX SAPI config var to a prefix with matching packages:
+
+    /opt/smartdc/bin/sapiadm update \\
+       \$(/opt/smartdc/bin/sdc-sapi /services?name=docker | json -H 0.uuid) \\
+       metadata.PACKAGE_PREFIX="<YOUR_PREFIX>"
+
+or (b) adding some "$packagePrefix*" packages.
+EOF
+    if [[ "$packagePrefix" == "sample-" ]]; then
+        cat >&2 <<EOF
+
+    # This will add a number of "sample-*" packages
+    sdcadm post-setup dev-sample-data
+EOF
+    fi
+    exit 2
+fi
+
+
+# Prerequisite: Ensure USE_TLS is set.
+useTls=$(json -f /zones/$DOCKER_UUID/root/opt/smartdc/docker/etc/config.json useTls)
+if [[ ${useTls} != "true" ]]; then
+    cat >&2 <<EOF
+FATAL: You must have sdc-docker TLS enabled to run these tests. To enable, run:
+
+    /opt/smartdc/bin/sapiadm update \$(/opt/smartdc/bin/sdc-sapi \\
+        /services?name=docker | json -H 0.uuid) metadata.USE_TLS=true
+    sdc-login -l docker svcadm restart config-agent
+
+and then try again.
+EOF
+    exit 2
+fi
+
+
+echo "# Test config:"
+echo "#  DOCKER_ADMIN_URL=${DOCKER_ADMIN_URL}"
+echo "#  DOCKER_AVAILABLE_CLI_VERSIONS=${DOCKER_AVAILABLE_CLI_VERSIONS}"
+if [[ -n "$DOCKER_TEST_CONFIG_FILE" ]]; then
+    echo "#  DOCKER_TEST_CONFIG_FILE=${DOCKER_TEST_CONFIG_FILE}"
+fi
+echo "#  DOCKER_CLI_VERSIONS=${DOCKER_CLI_VERSIONS}"
+echo "#  COMPOSE_AVAILABLE_CLI_VERSIONS=${COMPOSE_AVAILABLE_CLI_VERSIONS}"
+echo "#  COMPOSE_CLI_VERSIONS=${COMPOSE_CLI_VERSIONS}"
+echo "#  DOCKER_URL=${DOCKER_URL}"
+echo "#  DOCKER_UUID=${DOCKER_UUID}"
+echo "#  FWAPI_URL=${FWAPI_URL}"
+echo "#  NFS_VOLUMES_ENABLED=${NFS_VOLUMES_ENABLED}"
+echo "#  PAPI_URL=${PAPI_URL}"
+echo "#  SAPI_URL=${SAPI_URL}"
+echo "#  VMAPI_URL=${VMAPI_URL}"

@@ -5,7 +5,7 @@
 #
 
 #
-# Copyright (c) 2014, Joyent, Inc.
+# Copyright 2017 Joyent, Inc.
 #
 
 NAME:=docker
@@ -16,7 +16,7 @@ RESTDOWN_FLAGS   = --brand-dir=deps/restdown-brand-remora
 
 TAPE	:= ./node_modules/.bin/tape
 
-JS_FILES	:= $(shell find lib test -name '*.js' | grep -v '/tmp/')
+JS_FILES	:= $(shell find lib plugins test -name '*.js' | grep -v '/tmp/')
 JSL_CONF_NODE	 = tools/jsl.node.conf
 JSL_FILES_NODE	 = $(JS_FILES)
 JSSTYLE_FILES	 = $(JS_FILES)
@@ -24,10 +24,11 @@ JSSTYLE_FLAGS	 = -f tools/jsstyle.conf
 SMF_MANIFESTS_IN = smf/manifests/docker.xml.in
 CLEAN_FILES += ./node_modules
 
-NODE_PREBUILT_VERSION=v0.10.32
+NODE_PREBUILT_VERSION=v4.9.0
 ifeq ($(shell uname -s),SunOS)
 	NODE_PREBUILT_TAG=zone
-	NODE_PREBUILT_IMAGE=de411e86-548d-11e4-a4b7-3bb60478632a
+	# Allow building on other than image sdc-minimal-multiarch-lts@15.4.1.
+	NODE_PREBUILT_IMAGE=18b094b0-eb01-11e5-80c1-175dac7ddf02
 endif
 
 
@@ -43,9 +44,12 @@ include ./tools/mk/Makefile.smf.defs
 
 VERSION=$(shell json -f $(TOP)/package.json version)
 COMMIT=$(shell git describe --all --long  | awk -F'-g' '{print $$NF}')
+BUILD_TIMESTAMP=$(shell date -u +'%Y-%m-%dT%H:%M:%SZ')
 
 RELEASE_TARBALL:=$(NAME)-pkg-$(STAMP).tar.bz2
 RELSTAGEDIR:=/tmp/$(STAMP)
+
+COAL ?= 10.99.99.7
 
 
 #
@@ -57,7 +61,7 @@ all: $(SMF_MANIFESTS) build/build.json | $(TAPE) $(NPM_EXEC) sdc-scripts
 
 build/build.json:
 	mkdir -p build
-	echo "{\"version\": \"$(VERSION)\", \"commit\": \"$(COMMIT)\", \"stamp\": \"$(STAMP)\"}" | json >$@
+	echo "{\"version\": \"$(VERSION)\", \"commit\": \"$(COMMIT)\", \"date\": \"$(BUILD_TIMESTAMP)\", \"stamp\": \"$(STAMP)\"}" | json >$@
 
 sdc-scripts: deps/sdc-scripts/.git
 
@@ -66,6 +70,7 @@ $(TAPE): | $(NPM_EXEC)
 
 CLEAN_FILES += $(TAPE) ./node_modules/tape
 
+# Run *unit* tests.
 .PHONY: test
 test: $(TAPE)
 	@(for F in test/unit/*.test.js; do \
@@ -74,9 +79,33 @@ test: $(TAPE)
 		[[ $$? == "0" ]] || exit 1; \
 	done)
 
+# Integration tests:
+#
+# - Typically the full suite of integration tests is run from the headnode GZ:
+#       /zones/$(vmadm lookup -1 alias=docker0)/root/opt/smartdc/docker/test/runtests
+#
+# - Integration tests that just call the docker client (i.e. that don't assume
+#   running in the GZ) can be run from your Mac's dev build, e.g.:
+# 	./test/runtest ./test/integration/info.test.js
+#
+.PHONY: test-integration-in-coal
+test-integration-in-coal:
+	@ssh root@$(COAL) 'DOCKER_CLI_VERSIONS="$(DOCKER_CLI_VERSIONS)" \
+		COMPOSE_CLI_VERSIONS="$(COMPOSE_CLI_VERSIONS)" \
+		LOG_LEVEL=$(LOG_LEVEL) \
+		/zones/$$(vmadm lookup -1 alias=docker0)/root/opt/smartdc/docker/test/runtests $(TEST_ARGS)'
+
+
 .PHONY: git-hooks
 git-hooks:
-	[[ -e .git/hooks/pre-commit ]] || ln -s ../../tools/pre-commit.sh .git/hooks/pre-commit
+	[[ -e .git/hooks/pre-commit ]] || ln -sf ../../tools/pre-commit.sh .git/hooks/pre-commit
+
+
+.PHONY: check-docs
+check-docs:
+	@./tools/check-docs.sh
+
+check:: check-docs
 
 
 #
@@ -91,12 +120,16 @@ release: all
 	cp -R $(TOP)/deps/sdc-scripts/* $(RELSTAGEDIR)/root/opt/smartdc/boot/
 	cp -R $(TOP)/boot/* $(RELSTAGEDIR)/root/opt/smartdc/boot/
 	# docker
-	mkdir -p $(RELSTAGEDIR)/root/opt/smartdc/$(NAME)/{etc,build}
+	mkdir -p $(RELSTAGEDIR)/root/opt/smartdc/$(NAME)/build
 	cp -r \
 		$(TOP)/package.json \
+		$(TOP)/bin \
+		$(TOP)/etc \
 		$(TOP)/lib \
+		$(TOP)/plugins \
 		$(TOP)/node_modules \
 		$(TOP)/smf \
+		$(TOP)/tls \
 		$(TOP)/test \
 		$(TOP)/sapi_manifests \
 		$(RELSTAGEDIR)/root/opt/smartdc/$(NAME)

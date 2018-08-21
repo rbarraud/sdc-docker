@@ -11,21 +11,33 @@
 
 # Run a single test of any type.
 
+if [ "$TRACE" != "" ]; then
+    export PS4='${BASH_SOURCE}:${LINENO}: ${FUNCNAME[0]:+${FUNCNAME[0]}(): }'
+    set -o xtrace
+fi
+set -o errexit
+set -o pipefail
+
+
 TOP=$(cd $(dirname $0)/../; pwd)
+MISSING_FILE="true"
 NODE_INSTALL=$TOP/build/node
 TAPE=$TOP/node_modules/.bin/tape
 UNAME=$(uname -s)
 
-guard_file=/lib/sdc/.sdc-test-no-production-data
-if [[ $UNAME == "SunOS" ]] && [[ ! -f "$guard_file" ]]; then
-    cat <<EOF
-To run this test you must create the file:
-
-    $guard_file
-
-after ensuring you have no production data on this SDC.
-EOF
+if [[ -n $1 ]]; then
+    if [[ -f $1 ]]; then
+        MISSING_FILE="false"
+    else
+        echo "$(basename $0): $1 does not exist" >&2
+    fi
+fi
+if [[ ${MISSING_FILE} == "true" || -n $2 ]]; then
+    echo "Usage: $0 <test>"
     exit 2
 fi
+
+# Include common functions (eg. fatal) and perform sanity checks
+source $(dirname $0)/runtest.common
 
 PATH=$NODE_INSTALL/bin:$PATH $TAPE $1

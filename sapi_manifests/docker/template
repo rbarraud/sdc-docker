@@ -1,20 +1,41 @@
 {
+    "adminUuid": "{{{ufds_admin_uuid}}}",
     "// port": "2376 for tls",
     "port": 2375,
     "logLevel": "debug",
+    {{#DOCKER_READONLY}}
+    "readOnly": true,
+    {{/DOCKER_READONLY}}
+    {{#DC_MAINT_MESSAGE}}
+    "dcMaintMessage": "{{{DC_MAINT_MESSAGE}}}",
+    {{/DC_MAINT_MESSAGE}}
+    {{#DC_MAINT_ETA}}
+    "dcMaintEta": "{{{DC_MAINT_ETA}}}",
+    {{/DC_MAINT_ETA}}
     "datacenterName": "{{{datacenter_name}}}",
 
     "backend": "sdc",
-    "defaultPackage": "sdc_512",
+    "defaultMaxLogSize": {{#DEFAULT_MAX_LOG_SIZE}}{{{DEFAULT_MAX_LOG_SIZE}}}{{/DEFAULT_MAX_LOG_SIZE}}{{^DEFAULT_MAX_LOG_SIZE}}50000000{{/DEFAULT_MAX_LOG_SIZE}},
+    "defaultMemory": {{#DEFAULT_MEMORY}}{{{DEFAULT_MEMORY}}}{{/DEFAULT_MEMORY}}{{^DEFAULT_MEMORY}}1024{{/DEFAULT_MEMORY}},
+    "enabledLogDrivers": "{{#ENABLED_LOG_DRIVERS}}{{{ENABLED_LOG_DRIVERS}}}{{/ENABLED_LOG_DRIVERS}}{{^ENABLED_LOG_DRIVERS}}json-file{{/ENABLED_LOG_DRIVERS}}",
+    "packagePrefix": "{{#PACKAGE_PREFIX}}{{{PACKAGE_PREFIX}}}{{/PACKAGE_PREFIX}}{{^PACKAGE_PREFIX}}sample-{{/PACKAGE_PREFIX}}",
+    "externalNetwork": "{{#EXTERNAL_NET}}{{{EXTERNAL_NET}}}{{/EXTERNAL_NET}}{{^EXTERNAL_NET}}external{{/EXTERNAL_NET}}",
+    "overlay": {
+{{#fabric_cfg}}
+        "externalPool": "{{{sdc_nat_pool}}}",
+{{/fabric_cfg}}
+        "enabled": {{#USE_FABRICS}}true{{/USE_FABRICS}}{{^USE_FABRICS}}false{{/USE_FABRICS}}
+    },
     "moray": {
         "logLevel": "info",
         "host": "{{{MORAY_SERVICE}}}",
-        "port": 2020,
-        "connectTimeout": 200,
-        "retry": {
-            "retries": 2,
-            "minTimeout": 500
-        }
+        "port": 2020
+    },
+    "binder": {
+        "domain": "{{{BINDER_SERVICE}}}"
+    },
+    "fwapi": {
+        "url": "http://fwapi.{{{datacenter_name}}}.{{{dns_domain}}}"
     },
     "imgapi": {
         "url": "http://imgapi.{{{datacenter_name}}}.{{{dns_domain}}}"
@@ -31,13 +52,69 @@
     "cnapi": {
         "url": "http://cnapi.{{{datacenter_name}}}.{{{dns_domain}}}"
     },
+    {{#CNS_SERVICE}}
+    "cns": {
+        "url": "http://{{{cns_domain}}}"
+    },
+    {{/CNS_SERVICE}}
     "wfapi": {
         "forceMd5Check": true,
-        "workflows": ["pull-image"],
+        "workflows": ["pull-image-v2", "push-image"],
         "url": "http://workflow.{{{datacenter_name}}}.{{{dns_domain}}}"
     },
-    "registry": {
-        "indexUrl": "https://index.docker.io",
-        "registryUrl": "https://registry-1.docker.io"
+{{#experimental_docker_nfs_shared_volumes}}
+    "volapi": {
+        "url": "http://volapi.{{{datacenter_name}}}.{{{dns_domain}}}"
+    },
+{{/experimental_docker_nfs_shared_volumes}}
+    "httpProxy": "{{{http_proxy}}}",
+    "dockerRegistryInsecure": {{^docker_registry_insecure}}false{{/docker_registry_insecure}}{{#docker_registry_insecure}}{{{docker_registry_insecure}}}{{/docker_registry_insecure}},
+
+    {{#DOCKER_USE_CONN_WATCHER}}
+    "useConnectionStatusWatcher": true,
+    {{/DOCKER_USE_CONN_WATCHER}}
+    "useTls": {{^USE_TLS}}false{{/USE_TLS}}{{#USE_TLS}}{{{USE_TLS}}}{{/USE_TLS}},
+    "tls": {
+        "requestCert": true,
+        "rejectUnauthorized": false
+    },
+
+    {{^account_allowed_dcs}}
+    "account_allowed_dcs": false,
+    {{/account_allowed_dcs}}
+    {{#account_allowed_dcs}}
+    "account_allowed_dcs": {{{account_allowed_dcs}}},
+    {{/account_allowed_dcs}}
+    "account_allowed_dcs_msg": "{{{account_allowed_dcs_msg}}}",
+{{#experimental_fluentd_host}}
+    "fluentd_host": "{{{experimental_fluentd_host}}}",
+{{/experimental_fluentd_host}}
+{{#experimental_docker_nfs_shared_volumes}}
+    "experimental_docker_nfs_shared_volumes": {{{experimental_docker_nfs_shared_volumes}}},
+{{/experimental_docker_nfs_shared_volumes}}
+{{#experimental_docker_automount_nfs_shared_volumes}}
+    "experimental_docker_automount_nfs_shared_volumes": {{{experimental_docker_automount_nfs_shared_volumes}}},
+{{/experimental_docker_automount_nfs_shared_volumes}}
+{{#FWRULE_VERSION}}
+    "fwrule_version": {{{FWRULE_VERSION}}},
+{{/FWRULE_VERSION}}
+
+{{#DOCKER_PLUGINS}}
+    "plugins": {{{DOCKER_PLUGINS}}},
+{{/DOCKER_PLUGINS}}
+
+    "ufds": {
+        "url": "ldaps://{{{ufds_domain}}}",
+        "bindDN": "{{{ufds_ldap_root_dn}}}",
+        "bindPassword": "{{{ufds_ldap_root_pw}}}",
+        "cache": {
+            "size": 5000,
+            "age": 60
+        },
+        "maxConnections": 1,
+        "retry": {
+            "initialDelay": 1000
+        },
+        "clientTimeout": 120000
     }
 }

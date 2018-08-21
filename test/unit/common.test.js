@@ -5,7 +5,7 @@
  */
 
 /*
- * Copyright (c) 2014, Joyent, Inc.
+ * Copyright (c) 2016, Joyent, Inc.
  */
 
 /*
@@ -60,6 +60,70 @@ test('humanDuration', function (t) {
     t.equal(humanDuration(24*month), '24 months');
     t.equal(humanDuration(24*month + 2*week), '2.010959 years');
     t.equal(humanDuration(3*year + 2*month), '3.164384 years');
+
+    t.end();
+});
+
+
+test('boolFromQueryParam', function (t) {
+    var boolFromQueryParam = common.boolFromQueryParam;
+
+    t.equal(boolFromQueryParam(undefined), false);
+
+    t.equal(boolFromQueryParam(''), false);
+    t.equal(boolFromQueryParam(' '), false);
+    t.equal(boolFromQueryParam('0'), false);
+    t.equal(boolFromQueryParam('no'), false);
+    t.equal(boolFromQueryParam('false'), false);
+    t.equal(boolFromQueryParam('none'), false);
+    t.equal(boolFromQueryParam('No'), false);
+    t.equal(boolFromQueryParam('NO'), false);
+    t.equal(boolFromQueryParam('nO '), false);
+    t.equal(boolFromQueryParam('\t FaLse'), false);
+    t.equal(boolFromQueryParam('None'), false);
+
+    t.equal(boolFromQueryParam('true'), true);
+    t.equal(boolFromQueryParam('True'), true);
+    t.equal(boolFromQueryParam('1'), true);
+    t.equal(boolFromQueryParam('yes'), true);
+    t.equal(boolFromQueryParam('nope'), true);
+    t.equal(boolFromQueryParam('nein'), true);
+    t.equal(boolFromQueryParam('nyet'), true);
+
+    t.end();
+});
+
+
+test('apiVersionCmp', function (t) {
+    var apiVersionCmp = common.apiVersionCmp;
+
+    t.equal(apiVersionCmp('1.22', 1.22), 0, '"1.22" == 1.22');
+    t.equal(apiVersionCmp(1.21, 1.22), -1, '1.21 < 1.22');
+    t.equal(apiVersionCmp(1.9, 1.22), -13, '"1.9" < 1.22');
+    t.equal(apiVersionCmp('1.23', '1.22'), 1, '"1.23" > "1.22"');
+    t.equal(apiVersionCmp('2.0', '1.0'), 1, '"2.0" > "1.0"');
+    t.equal(apiVersionCmp(1.0, 2.0), -1, '"1.0" < "2.0"');
+    t.equal(apiVersionCmp(1, 2), -1, '1 < 2');
+    t.equal(apiVersionCmp(2, '2.0'), 0, '2 == "2.0"');
+    t.equal(apiVersionCmp(2, '1.0'), 1, '2 > "1.0"');
+    t.throws(function () {
+        apiVersionCmp(-42, 42);
+    }, /a must match/, 'negative numbers throw');
+    t.throws(function () {
+        apiVersionCmp(undefined, 1.22);
+    }, /a \(string\) is required/, 'undefined throws');
+    t.throws(function () {
+        apiVersionCmp(null, 1.22);
+    }, /a \(string\) is required/, 'null throws');
+    t.throws(function () {
+        apiVersionCmp({hello: 'world'}, 1.22);
+    }, /a \(string\) is required/, 'object throws');
+    t.throws(function () {
+        apiVersionCmp({}, 1.22);
+    }, /a \(string\) is required/, 'empty object throws');
+    t.throws(function () {
+        apiVersionCmp([], 1.22);
+    }, /a \(string\) is required/, 'empty array throws');
 
     t.end();
 });
